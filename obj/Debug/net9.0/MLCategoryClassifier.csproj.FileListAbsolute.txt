@@ -75,3 +75,4 @@ C:\Users\Humam\source\repos\mlLearning\MLCategoryClassifier\obj\Debug\net9.0\ref
 C:\Users\Humam\source\repos\mlLearning\MLCategoryClassifier\obj\Debug\net9.0\MLCategoryClassifier.pdb
 C:\Users\Humam\source\repos\mlLearning\MLCategoryClassifier\obj\Debug\net9.0\MLCategoryClassifier.genruntimeconfig.cache
 C:\Users\Humam\source\repos\mlLearning\MLCategoryClassifier\obj\Debug\net9.0\ref\MLCategoryClassifier.dll
+C:\Users\Humam\source\repos\mlLearning\MLCategoryClassifier\obj\Debug\net9.0\MLCategoryClassifier.sourcelink.json

@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("MLCategoryClassifier")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+3793dd332b3b681ac1d977f65e771222caaa9206")]
 [assembly: System.Reflection.AssemblyProductAttribute("MLCategoryClassifier")]
 [assembly: System.Reflection.AssemblyTitleAttribute("MLCategoryClassifier")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

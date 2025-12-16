@@ -46,9 +46,6 @@ builder.Services.AddScoped<SubstringMatcher>();
 builder.Services.AddSingleton<TrainingDataSyncService>(); // Singleton because it uses IServiceScopeFactory internally
 builder.Services.AddScoped<CategoryClassificationService>();
 
-// Register PostgresNotificationListener as hosted service (Requirements 2.1)
-builder.Services.AddHostedService<PostgresNotificationListener>();
-
 var app = builder.Build();
 
 // Configure the HTTP request pipeline

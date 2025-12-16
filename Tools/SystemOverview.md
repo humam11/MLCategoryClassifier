@@ -29,11 +29,9 @@ The system supports both Arabic and Kurdish languages, combining substring match
 └────────────────────────┬────────────────────────────────────┘
                          │
 ┌────────────────────────┴────────────────────────────────────┐
-│                 Data Synchronization                         │
-│  PostgreSQL ──NOTIFY/LISTEN──► TrainingDataSyncService       │
-│                                        │                     │
-│                                        ▼                     │
-│                                    MongoDB                   │
+│              Data Layer (Startup Sync)                       │
+│  PostgreSQL ──────────► TrainingDataSyncService ──► MongoDB  │
+│  (Source of Truth)           (On Startup)        (ML Training)│
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -217,71 +215,6 @@ private List<CategoryPredictionResponse> CombineResults(
 
 ---
 
-## Real-Time Data Synchronization
-
-The system keeps MongoDB training data in sync with PostgreSQL using NOTIFY/LISTEN:
-
-### PostgreSQL Triggers → Notification Listener → MongoDB Updates
-
-```csharp
-// PostgresNotificationListener.cs - Background service
-public class PostgresNotificationListener : IHostedService
-{
-    private async Task ProcessNotificationsAsync(CancellationToken cancellationToken)
-    {
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            // Blocks until notification arrives
-            await _connection.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
-        }
-    }
-
-    private void OnNotificationReceived(object sender, NpgsqlNotificationEventArgs e)
-    {
-        // Process asynchronously to not block
-        _ = Task.Run(async () =>
-        {
-            await ProcessNotificationPayloadAsync(e.Channel, e.Payload);
-        });
-    }
-}
-```
-
-**Notification Handling:**
-```csharp
-// TrainingDataSyncService.cs - Handle category changes
-public async Task HandleCategoryNotificationAsync(CategoryNotification notification)
-{
-    switch (notification.Operation.ToUpperInvariant())
-    {
-        case "INSERT":
-        case "UPDATE":
-            var category = await postgresDb.Categories
-                .FirstOrDefaultAsync(c => c.CategoryId == notification.CategoryId);
-            if (category != null)
-                await SyncCategoryAsync(category, postgresDb, trainingDataRepo);
-            break;
-
-        case "DELETE":
-            await trainingDataRepo.DeleteAsync(notification.CategoryId);
-            break;
-    }
-}
-```
-
-**Reconnection with Exponential Backoff:**
-```csharp
-// PostgresNotificationListener.cs
-private const int InitialRetryDelayMs = 1000;
-private const int MaxRetryDelayMs = 60000;
-private const int MaxReconnectAttempts = 5;
-
-// On connection failure:
-retryDelay = Math.Min(retryDelay * 2, MaxRetryDelayMs); // 1s → 2s → 4s → 8s...
-```
-
----
-
 ## Training Data Structure
 
 MongoDB documents combine category info with brand/model names for ML training:
@@ -437,6 +370,6 @@ private async Task<List<TrainingDataDocument>> GetFilteredTrainingDataWithFallba
 1. **Dual Classification**: Substring matching provides fast, exact matches; ML handles fuzzy/semantic matching
 2. **Fixed LIKE Score (25%)**: Prevents substring matches from dominating when ML has higher confidence
 3. **Separate Models per Language**: Arabic and Kurdish have different linguistic patterns
-4. **Real-time Sync**: PostgreSQL triggers ensure MongoDB stays current without polling
+4. **Startup Sync**: PostgreSQL data is synced to MongoDB on application startup; restart to pick up changes
 5. **Graceful Degradation**: Cached data and fallback strategies keep the system running during failures
 6. **Simple Architecture**: No interfaces or abstractions - just concrete classes for maintainability

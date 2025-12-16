@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 using Npgsql;
 
 namespace MLCategoryClassifier;
@@ -11,7 +10,7 @@ public class SyncException : Exception
     public SyncException(string message, Exception innerException) : base(message, innerException) { }
 }
 
-// Service for synchronizing training data from PostgreSQL to MongoDB
+// Service for synchronizing training data from PostgreSQL to MongoDB on startup
 public class TrainingDataSyncService
 {
     private readonly IServiceScopeFactory _scopeFactory;
@@ -100,7 +99,6 @@ public class TrainingDataSyncService
         }
     }
 
-
     // Synchronizes a single category from PostgreSQL to MongoDB
     private async Task SyncCategoryAsync(
         Category category, 
@@ -126,7 +124,7 @@ public class TrainingDataSyncService
             KurdishTrainingExamples = existingDoc?.KurdishTrainingExamples ?? new List<string>()
         };
 
-        // Only query brands_models for leaf categories (Requirements 1.3, 1.4, 1.5)
+        // Only query brands_models for leaf categories
         if (category.IsLeaf)
         {
             var brandModels = await postgresDb.BrandModels
@@ -151,186 +149,7 @@ public class TrainingDataSyncService
             }
         }
 
-        // Upsert to MongoDB (idempotent - Requirements 1.6)
+        // Upsert to MongoDB (idempotent)
         await trainingDataRepo.UpsertAsync(document);
     }
-
-    // Handles a category notification from PostgreSQL (INSERT/UPDATE/DELETE)
-    public async Task HandleCategoryNotificationAsync(CategoryNotification notification)
-    {
-        if (notification == null)
-        {
-            _logger.LogWarning("Received null category notification");
-            return;
-        }
-        
-        try
-        {
-            using var scope = _scopeFactory.CreateScope();
-            var postgresDb = scope.ServiceProvider.GetRequiredService<PostgresDbContext>();
-            var trainingDataRepo = scope.ServiceProvider.GetRequiredService<TrainingDataRepository>();
-
-            switch (notification.Operation.ToUpperInvariant())
-            {
-                case "INSERT":
-                case "UPDATE":
-                    try
-                    {
-                        var category = await postgresDb.Categories
-                            .AsNoTracking()
-                            .FirstOrDefaultAsync(c => c.CategoryId == notification.CategoryId);
-                        
-                        if (category != null)
-                        {
-                            await SyncCategoryAsync(category, postgresDb, trainingDataRepo);
-                            _logger.LogInformation(
-                                "Processed {Operation} notification for category {CategoryId}", 
-                                notification.Operation, notification.CategoryId);
-                        }
-                        else
-                        {
-                            _logger.LogWarning(
-                                "Category {CategoryId} not found in PostgreSQL for {Operation} notification",
-                                notification.CategoryId, notification.Operation);
-                        }
-                    }
-                    catch (NpgsqlException ex)
-                    {
-                        _logger.LogError(ex, "PostgreSQL error processing {Operation} notification for category {CategoryId}",
-                            notification.Operation, notification.CategoryId);
-                        throw;
-                    }
-                    break;
-
-                case "DELETE":
-                    try
-                    {
-                        await trainingDataRepo.DeleteAsync(notification.CategoryId);
-                        _logger.LogInformation(
-                            "Deleted category {CategoryId} from MongoDB", 
-                            notification.CategoryId);
-                    }
-                    catch (RepositoryException ex)
-                    {
-                        _logger.LogError(ex, "MongoDB error deleting category {CategoryId}", notification.CategoryId);
-                        throw;
-                    }
-                    break;
-
-                default:
-                    _logger.LogWarning(
-                        "Unknown operation {Operation} for category notification", 
-                        notification.Operation);
-                    break;
-            }
-        }
-        catch (Exception ex) when (ex is not NpgsqlException && ex is not RepositoryException)
-        {
-            _logger.LogError(ex, "Unexpected error handling category notification: Operation={Operation}, CategoryId={CategoryId}",
-                notification.Operation, notification.CategoryId);
-        }
-    }
-
-    // Handles a brand/model notification from PostgreSQL (INSERT/UPDATE/DELETE)
-    public async Task HandleBrandModelNotificationAsync(BrandModelNotification notification)
-    {
-        if (notification == null)
-        {
-            _logger.LogWarning("Received null brand/model notification");
-            return;
-        }
-        
-        try
-        {
-            using var scope = _scopeFactory.CreateScope();
-            var trainingDataRepo = scope.ServiceProvider.GetRequiredService<TrainingDataRepository>();
-
-            switch (notification.Operation.ToUpperInvariant())
-            {
-                case "INSERT":
-                    var newModel = new BrandModelInfo
-                    {
-                        BrandModelId = notification.BrandModelId,
-                        NameEnglish = notification.NameEnglish ?? string.Empty,
-                        NameArabic = notification.NameArabic ?? string.Empty,
-                        NameKurdish = notification.NameKurdish ?? string.Empty
-                    };
-                    await trainingDataRepo.AddBrandModelAsync(notification.CategoryId, newModel);
-                    _logger.LogInformation(
-                        "Added brand/model {BrandModelId} to category {CategoryId}", 
-                        notification.BrandModelId, notification.CategoryId);
-                    break;
-
-                case "UPDATE":
-                    var updatedModel = new BrandModelInfo
-                    {
-                        BrandModelId = notification.BrandModelId,
-                        NameEnglish = notification.NameEnglish ?? string.Empty,
-                        NameArabic = notification.NameArabic ?? string.Empty,
-                        NameKurdish = notification.NameKurdish ?? string.Empty
-                    };
-                    await trainingDataRepo.UpdateBrandModelAsync(
-                        notification.CategoryId, 
-                        notification.BrandModelId, 
-                        updatedModel);
-                    _logger.LogInformation(
-                        "Updated brand/model {BrandModelId} in category {CategoryId}", 
-                        notification.BrandModelId, notification.CategoryId);
-                    break;
-
-                case "DELETE":
-                    await trainingDataRepo.RemoveBrandModelAsync(
-                        notification.CategoryId, 
-                        notification.BrandModelId);
-                    _logger.LogInformation(
-                        "Removed brand/model {BrandModelId} from category {CategoryId}", 
-                        notification.BrandModelId, notification.CategoryId);
-                    break;
-
-                default:
-                    _logger.LogWarning(
-                        "Unknown operation {Operation} for brand/model notification", 
-                        notification.Operation);
-                    break;
-            }
-        }
-        catch (RepositoryException ex)
-        {
-            _logger.LogError(ex, "MongoDB error handling brand/model notification: Operation={Operation}, BrandModelId={BrandModelId}, CategoryId={CategoryId}",
-                notification.Operation, notification.BrandModelId, notification.CategoryId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unexpected error handling brand/model notification: Operation={Operation}, BrandModelId={BrandModelId}, CategoryId={CategoryId}",
-                notification.Operation, notification.BrandModelId, notification.CategoryId);
-        }
-    }
-}
-
-// Category notification payload from PostgreSQL
-public class CategoryNotification
-{
-    public string Type { get; set; } = string.Empty;
-    public string Op { get; set; } = string.Empty;
-    public ushort CategoryId { get; set; }
-    public string? NameArabic { get; set; }
-    public string? NameKurdish { get; set; }
-    
-    // Alias for backward compatibility
-    public string Operation => Op;
-}
-
-// Brand/model notification payload from PostgreSQL
-public class BrandModelNotification
-{
-    public string Type { get; set; } = string.Empty;
-    public string Op { get; set; } = string.Empty;
-    public ushort BrandModelId { get; set; }
-    public ushort CategoryId { get; set; }
-    public string? NameEnglish { get; set; }
-    public string? NameArabic { get; set; }
-    public string? NameKurdish { get; set; }
-    
-    // Alias for backward compatibility
-    public string Operation => Op;
 }
